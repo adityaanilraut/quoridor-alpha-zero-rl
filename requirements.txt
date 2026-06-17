@@ -1,0 +1,5 @@
+numpy>=1.24
+torch>=2.1
+# pygame-ce is a maintained drop-in for pygame with up-to-date wheels
+# (import name is still `pygame`). Plain `pygame` also works.
+pygame-ce>=2.4
