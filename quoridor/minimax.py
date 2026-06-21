@@ -8,7 +8,7 @@ a UI opponent and as a yardstick for the trained network.
 
 import math
 
-from .game import (decode_action, h_wall_action, v_wall_action)
+from .game import h_wall_action, v_wall_action
 
 _INF = math.inf
 

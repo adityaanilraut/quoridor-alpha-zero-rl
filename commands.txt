@@ -1,0 +1,19 @@
+=== QUORIDOR COMMANDS ===
+
+1. TRAIN the model by playing against itself (5x5 board - fast, 60 iters x 30 games):
+   python3 -m quoridor.train --preset fast --iterations 100 --games 30
+
+2. TRAIN on full 9x9 board (stronger, slower):
+   python3 -m quoridor.train --preset standard
+
+3. EVALUATE trained model vs minimax depth 2:
+   python3 -m quoridor.eval --checkpoint checkpoints/best.pt --depth 2 --games 20
+
+4. PLAY against the trained model (UI):
+   python3 -m ui.play --opponent model --model checkpoints/best.pt --sims 200
+
+5. PLAY against minimax depth 2 (UI):
+   python3 -m ui.play --opponent minimax --depth 2
+
+6. PLAY against a random agent (UI):
+   python3 -m ui.play --opponent random

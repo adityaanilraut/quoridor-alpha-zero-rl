@@ -37,6 +37,7 @@ class Config:
     # --- training ---
     iterations: int = 100
     replay_size: int = 60_000
+    replay_recent_ratio: float = 0.5  # fraction of each batch drawn from newest data
     batch_size: int = 256
     train_steps_per_iter: int = 400
     lr: float = 1e-3
@@ -73,13 +74,14 @@ def fast_config():
         channels=32,
         res_blocks=3,
         mcts_sims=60,
-        games_per_iter=20,
+        games_per_iter=30,
         temp_threshold=8,
         max_moves=80,
-        iterations=40,
+        iterations=60,
         replay_size=20_000,
+        replay_recent_ratio=0.5,
         batch_size=128,
-        train_steps_per_iter=200,
+        train_steps_per_iter=1000,
         eval_games=20,
     )
 

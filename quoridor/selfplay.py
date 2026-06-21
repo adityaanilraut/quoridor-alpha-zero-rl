@@ -21,7 +21,7 @@ def play_game(net, config, mcts=None):
     move = 0
     while not state.is_terminal() and move < config.max_moves:
         canonical = state.canonical()
-        counts = mcts.run(canonical, add_noise=True)
+        counts = mcts.run_batched(canonical, add_noise=True)
         total = counts.sum()
         if total <= 0:  # no visits recorded; fall back to uniform legal
             counts = canonical.legal_actions_mask()

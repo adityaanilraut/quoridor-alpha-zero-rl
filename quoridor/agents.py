@@ -36,7 +36,7 @@ class NeuralMCTSAgent:
         self.name = "alphazero"
 
     def select_action(self, state):
-        counts = self.mcts.run(state.canonical(), add_noise=self.add_noise)
+        counts = self.mcts.run_batched(state.canonical(), add_noise=self.add_noise)
         if self.temperature <= 1e-6:
             a_can = int(np.argmax(counts))
         else:
