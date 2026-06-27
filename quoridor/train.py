@@ -71,7 +71,9 @@ def train(config, resume=None, eval_minimax=True):
 
     best_path = os.path.join(config.checkpoint_dir, "best.pt")
     best.save(best_path)
-    buffer = ReplayBuffer(config.replay_size, recent_ratio=config.replay_recent_ratio)
+    buffer = ReplayBuffer(config.replay_size,
+                          recent_ratio=config.replay_recent_ratio,
+                          value_mix_lambda=getattr(config, "mixed_value_lambda", 1.0))
     candidate = best.clone()  # persisted across iterations so training accumulates
 
     # Determine number of parallel workers
@@ -116,6 +118,14 @@ def train(config, resume=None, eval_minimax=True):
         print(f"  self-play: {len(all_samples)} samples from "
               f"{config.games_per_iter} games "
               f"({time.time() - t0:.1f}s)")
+
+        # 1b) Reanalyze: refresh a slice of old targets with the current best
+        reanalyze_frac = getattr(config, "reanalyze_fraction", 0.0)
+        if reanalyze_frac > 0 and len(buffer) >= config.batch_size:
+            tr = time.time()
+            k = buffer.reanalyze(best, config, reanalyze_frac)
+            print(f"  reanalyze: refreshed {k} samples with best net "
+                  f"({time.time() - tr:.1f}s)")
 
         # 2) Train the candidate network (continues from previous iteration)
         losses = []
@@ -171,6 +181,12 @@ def main():
     parser.add_argument("--device", default=None, choices=["auto", "cpu", "mps"])
     parser.add_argument("--resume", default=None, help="checkpoint to resume from")
     parser.add_argument("--no-eval-minimax", action="store_true")
+    parser.add_argument("--no-gumbel", action="store_true",
+                        help="use classic PUCT+Dirichlet search instead of Gumbel")
+    parser.add_argument("--reanalyze", type=float, default=None,
+                        help="fraction of the buffer re-searched with best net each iter")
+    parser.add_argument("--value-lambda", type=float, default=None,
+                        help="value target = lambda*outcome + (1-lambda)*search value")
     args = parser.parse_args()
 
     config = get_config(args.preset)
@@ -182,6 +198,12 @@ def main():
         config.mcts_sims = args.sims
     if args.device is not None:
         config.device = args.device
+    if args.no_gumbel:
+        config.use_gumbel = False
+    if args.reanalyze is not None:
+        config.reanalyze_fraction = args.reanalyze
+    if args.value_lambda is not None:
+        config.mixed_value_lambda = args.value_lambda
 
     train(config, resume=args.resume, eval_minimax=not args.no_eval_minimax)
 

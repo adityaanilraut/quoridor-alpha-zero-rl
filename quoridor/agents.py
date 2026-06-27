@@ -36,12 +36,18 @@ class NeuralMCTSAgent:
         self.name = "alphazero"
 
     def select_action(self, state):
-        counts = self.mcts.run_batched(state.canonical(), add_noise=self.add_noise)
-        if self.temperature <= 1e-6:
-            a_can = int(np.argmax(counts))
+        canonical = state.canonical()
+        if getattr(self.config, "use_gumbel", True):
+            pi, _ = self.mcts.run_gumbel(canonical)
         else:
-            probs = counts ** (1.0 / self.temperature)
+            counts = self.mcts.run_batched(canonical, add_noise=self.add_noise)
+            total = counts.sum()
+            pi = counts / total if total > 0 else canonical.legal_actions_mask()
+        if self.temperature <= 1e-6:
+            a_can = int(np.argmax(pi))
+        else:
+            probs = pi ** (1.0 / self.temperature)
             probs = probs / probs.sum()
             a_can = int(np.random.choice(len(probs), p=probs))
-        # counts are in the canonical (player-0) frame; map back to absolute
+        # the policy is in the canonical (player-0) frame; map back to absolute
         return a_can if state.current_player == 0 else flip_action(a_can, state.N)

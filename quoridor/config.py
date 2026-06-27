@@ -29,6 +29,16 @@ class Config:
     dirichlet_alpha: float = 0.3
     dirichlet_eps: float = 0.25
 
+    # --- EfficientZero-V2-style search/targets (work on the true simulator) ---
+    use_gumbel: bool = True            # Gumbel MuZero root search + improved-policy target
+    gumbel_n_considered: int = 16      # actions sampled at the root (Sequential-Halving width)
+    gumbel_c_visit: float = 50.0       # sigma() scale constant
+    gumbel_c_scale: float = 1.0        # sigma() scale multiplier
+    mixed_value_lambda: float = 1.0    # value target = lambda*outcome + (1-lambda)*search value
+                                       #   1.0 = pure game outcome (AlphaZero); ~0.75 enables mixing
+    reanalyze_fraction: float = 0.0    # fraction of the buffer re-searched with best net each iter
+                                       #   0.0 = off; ~0.05 enables reanalyze
+
     # --- self-play ---
     games_per_iter: int = 30
     temp_threshold: int = 12      # moves before play becomes greedy

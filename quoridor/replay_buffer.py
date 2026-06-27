@@ -1,7 +1,13 @@
-"""Fixed-size replay buffer of (planes, policy_target, value_target) samples.
+"""Fixed-size replay buffer of self-play samples.
+
+Each entry is ``(planes, canonical_state, policy_target, outcome,
+search_value)``.  The value target handed to training is mixed at sample time:
+``z = lambda*outcome + (1-lambda)*search_value`` (EfficientZero-style search
+value mixing); ``lambda == 1`` recovers the pure-outcome AlphaZero target.
 
 Supports recency-weighted sampling so recent data dominates batches,
-preventing old stale samples from pulling the value head in wrong directions.
+preventing old stale samples from pulling the value head in wrong directions,
+and ``reanalyze`` to refresh old targets with a stronger net.
 """
 
 import random
@@ -11,9 +17,10 @@ import numpy as np
 
 
 class ReplayBuffer:
-    def __init__(self, capacity, recent_ratio=0.5):
+    def __init__(self, capacity, recent_ratio=0.5, value_mix_lambda=1.0):
         self.buffer = deque(maxlen=capacity)
         self.recent_ratio = recent_ratio
+        self.value_mix_lambda = value_mix_lambda
         # Track how many samples have been added so we can split old vs new
         self._total_added = 0
         # When we add a batch, we record (start_idx, end_idx) for each chunk
@@ -69,6 +76,30 @@ class ReplayBuffer:
                 indices = recent_indices + uniform_indices
 
         planes = np.stack([self.buffer[i][0] for i in indices]).astype(np.float32)
-        pi = np.stack([self.buffer[i][1] for i in indices]).astype(np.float32)
-        z = np.array([self.buffer[i][2] for i in indices], dtype=np.float32)
+        pi = np.stack([self.buffer[i][2] for i in indices]).astype(np.float32)
+        outcome = np.array([self.buffer[i][3] for i in indices], dtype=np.float32)
+        v_search = np.array([self.buffer[i][4] for i in indices], dtype=np.float32)
+        lam = self.value_mix_lambda
+        z = (lam * outcome + (1.0 - lam) * v_search).astype(np.float32)
         return planes, pi, z
+
+    def reanalyze(self, net, config, fraction):
+        """Re-search a random ``fraction`` of stored positions with ``net`` and
+        overwrite their policy target and search value (EfficientZero reanalyze).
+
+        Refreshing stale targets with a stronger net lets old games keep
+        contributing useful gradient signal.  Returns the number refreshed.
+        """
+        from .mcts import MCTS
+
+        n = len(self.buffer)
+        k = min(int(n * fraction), n)
+        if k <= 0:
+            return 0
+        mcts = MCTS(net, config)
+        for i in random.sample(range(n), k):
+            planes, canon, _pi, outcome, _v = self.buffer[i]
+            new_pi, new_v = mcts.run_gumbel(canon)
+            self.buffer[i] = (planes, canon, new_pi.astype(np.float32),
+                              outcome, np.float32(new_v))
+        return k

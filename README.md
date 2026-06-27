@@ -31,20 +31,26 @@ included as an immediate opponent and as a strength yardstick.
 
 ```
 quoridor/
+  __init__.py      package exports (Config, get_config, QuoridorState)
   game.py          rules engine: moves, jumps, wall legality (path guarantee), win
   encoding.py      board -> tensor planes (canonical / side-to-move perspective)
   network.py       policy + value ResNet and a torch wrapper (predict / train / io)
-  mcts.py          PUCT MCTS guided by the network
+  mcts.py          PUCT + Gumbel MuZero search guided by the network
   selfplay.py      generate (state, policy, outcome) training samples
-  replay_buffer.py fixed-size sample store
+  replay_buffer.py fixed-size sample store with recency weighting + reanalyze
   arena.py         pit two agents to measure relative strength
   train.py         the self-play -> train -> gate loop  (entry point)
   minimax.py       no-training alpha-beta opponent
   agents.py        RandomAgent / MinimaxAgent / NeuralMCTSAgent
   config.py        hyperparameters + `fast` (5x5) and `standard` (9x9) presets
-ui/play.py         Pygame board to play vs the model or minimax  (entry point)
-tests/test_game.py engine sanity checks
-checkpoints/       saved models (best.pt / latest.pt)
+ui/
+  play.py          Pygame board to play vs the model or minimax  (entry point)
+tests/
+  test_game.py     engine sanity checks
+  test_mcts.py     Gumbel MuZero search correctness
+  test_arena.py    arena win-attribution regression tests
+checkpoints/       saved model weights (best.pt, latest.pt, gitignored)
+commands.txt       quick-reference command cheatsheet
 ```
 
 ---
@@ -65,14 +71,15 @@ name is still `pygame`).
 Verify:
 
 ```bash
-python3 -m tests.test_game        # engine tests should all pass
+python3 -m pytest tests/ -q       # all tests should pass
 ```
 
 ---
 
 ## Quick start — play right now (no training)
 
-The minimax bot needs no checkpoint, so you can play immediately:
+The minimax bot needs no checkpoint, so you can play immediately.
+See `commands.txt` for a full cheatsheet of every command:
 
 ```bash
 python3 -m ui.play --opponent minimax --depth 2
@@ -141,6 +148,9 @@ python3 -m quoridor.train --preset standard --device cpu
 --device {auto,cpu,mps}    compute device
 --resume checkpoints/best.pt   continue from a saved model
 --no-eval-minimax          skip periodic minimax benchmark
+--no-gumbel                use classic PUCT+Dirichlet search instead of Gumbel
+--reanalyze FRAC           re-search FRAC of the buffer with best net each iter (e.g. 0.05)
+--value-lambda L           value target = L*outcome + (1-L)*search value (1.0 = pure outcome)
 ```
 
 Example — a lighter 9×9 run:
@@ -287,10 +297,26 @@ remaining.
 (logits over all actions) and a value head (`tanh`, who's winning). Small by
 design: `channels=64, blocks=5` for 9×9.
 
-**MCTS** (`mcts.py`). PUCT selection (`Q + c_puct·P·√ΣN/(1+N)`), the network
-supplies priors `P` and leaf value `v`, no random rollouts. Dirichlet noise at
-the root during self-play for exploration. The move-selection target is the
-visit-count distribution.
+**MCTS** (`mcts.py`). Two search modes, both planning on the *true* simulator
+(no learned model), with the network supplying priors `P` and leaf value `v`
+and no random rollouts:
+
+* **Gumbel MuZero** (`run_gumbel`, default) — samples candidate actions at the
+  root with Gumbel-Top-k and allocates the simulation budget by Sequential
+  Halving; interior nodes use the deterministic "completed-Q" rule. The
+  move-selection / training target is the *improved policy*
+  `π' = softmax(logits + σ(completedQ))`, which carries a policy-improvement
+  guarantee even at very low simulation counts — so you can train with far
+  fewer sims. Exploration comes from the Gumbel samples (no Dirichlet noise).
+* **PUCT** (`run_batched`, `--no-gumbel`) — classic AlphaZero selection
+  (`Q + c_puct·P·√ΣN/(1+N)`) with root Dirichlet noise; target is the
+  visit-count distribution.
+
+These are the EfficientZero-V2-style additions that port cleanly to a game with
+a perfect, cheap simulator. **Reanalyze** (`--reanalyze`) periodically re-runs
+the search on old buffer positions with the current best net to refresh their
+targets, and **mixed value targets** (`--value-lambda`) blend the game outcome
+with the search root value to lower value-target variance.
 
 **Training** (`train.py`). Loss = policy cross-entropy against the MCTS visit
 distribution + MSE between the value head and the eventual game result (from each
@@ -305,8 +331,13 @@ position's side-to-move perspective). The gating match prevents regressions.
 | `board_size` / `walls_per_player` | board + walls each | 5 / 3 | 9 / 10 |
 | `channels` / `res_blocks` | network size | 32 / 3 | 64 / 5 |
 | `mcts_sims` | search per move | 60 | 120 |
-| `c_puct` | exploration in MCTS | 1.5 | 1.5 |
-| `dirichlet_alpha` / `_eps` | root exploration noise | 0.3 / 0.25 | 0.3 / 0.25 |
+| `c_puct` | exploration in MCTS (PUCT mode) | 1.5 | 1.5 |
+| `dirichlet_alpha` / `_eps` | root exploration noise (PUCT mode) | 0.3 / 0.25 | 0.3 / 0.25 |
+| `use_gumbel` | Gumbel search + improved-policy target | `True` | `True` |
+| `gumbel_n_considered` | actions sampled at root (Seq.-Halving width) | 16 | 16 |
+| `gumbel_c_visit` / `_c_scale` | σ() scale in completed-Q | 50 / 1.0 | 50 / 1.0 |
+| `mixed_value_lambda` | `λ·outcome + (1-λ)·search value` (1.0 = pure outcome) | 1.0 | 1.0 |
+| `reanalyze_fraction` | buffer fraction re-searched / iter (0 = off) | 0.0 | 0.0 |
 | `games_per_iter` | self-play games / iter | 20 | 30 |
 | `temp_threshold` | exploratory plies before greedy | 8 | 12 |
 | `train_steps_per_iter` / `batch_size` | SGD per iter | 200 / 128 | 400 / 256 |
@@ -325,6 +356,16 @@ position's side-to-move perspective). The gating match prevents regressions.
 * **Pygame window won't open over SSH/headless.** It needs a display; run locally.
 * **`pygame` install issues on Python 3.14.** Use `pygame-ce` (in requirements).
 * **MPS slower than CPU.** Normal for tiny single inferences — use `--device cpu`.
+
+---
+
+## Quick reference
+
+All common commands are collected in `commands.txt` at the project root:
+
+```bash
+cat commands.txt
+```
 
 ---
 

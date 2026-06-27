@@ -17,3 +17,29 @@
 
 6. PLAY against a random agent (UI):
    python3 -m ui.play --opponent random
+
+=== EFFICIENTZERO-V2-STYLE FEATURES ===
+(Gumbel MuZero search is ON by default; reanalyze and mixed value targets are opt-in.)
+
+7. TRAIN with all EZ-V2 features enabled (Gumbel + reanalyze + mixed value):
+   python3 -m quoridor.train --preset fast --reanalyze 0.05 --value-lambda 0.75 --resume checkpoints/best.pt
+
+8. TRAIN on full 9x9 with reanalyze + mixed value:
+   python3 -m quoridor.train --preset standard --reanalyze 0.05 --value-lambda 0.75
+
+9. TRAIN with far fewer sims (Gumbel keeps a policy-improvement guarantee at low sims):
+   python3 -m quoridor.train --preset fast --sims 24
+
+10. TRAIN with classic PUCT + Dirichlet instead of Gumbel (disable EZ-V2 search):
+    python3 -m quoridor.train --preset fast --no-gumbel
+
+11. RESUME training from a saved checkpoint:
+    python3 -m quoridor.train --preset fast --resume checkpoints/best.pt
+
+12. RUN the test suite (engine + arena + Gumbel search):
+    python3 -m pytest tests/ -q
+
+New training flags:
+   --no-gumbel        use classic PUCT+Dirichlet search instead of Gumbel
+   --reanalyze FRAC   re-search FRAC of the buffer with best net each iter (e.g. 0.05; 0 = off)
+   --value-lambda L   value target = L*outcome + (1-L)*search value (1.0 = pure outcome)
